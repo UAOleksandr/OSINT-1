@@ -37,10 +37,15 @@ from sqlalchemy import (
                    )
     """
 
+def log_event(event, filename="userlog.txt"):
+    with open(filename, "a", encoding="utf-8") as log:
+        log.write(f"{datetime.now()} --> {event}")
+
+
 def refresh_logs():
 
     # retrieving data from log
-    with open("bot.log", "r", encoding="utf-8") as file:
+    with open("userlog.txt", "r", encoding="utf-8") as file:
         log_data = file.readlines()
     for record in log_data:
         print(record, type(record))
@@ -50,7 +55,7 @@ def refresh_logs():
             log_data.pop(log_data.index(record))
 
     # rewriting bot.log
-    with open("bot.log", "w", encoding="utf-8") as file:
+    with open("userlog.txt", "w", encoding="utf-8") as file:
         file.writelines(log_data)
 
 
@@ -68,6 +73,21 @@ csv_header = [
     "СЕРІЯ",                # 10
     "ІД"                    # 11
 ]
+header_orm = {
+    "ПІБ": "fullname",                  # 1
+    "ДН": "birth",                   # 2
+    "АДРЕСА": "address",               # 3
+    "МІСЦЕ РОБОТИ/СЛУЖБИ": "workplace",  # 4
+    "ПОСАДА/ЗВАННЯ": "position",        # 5
+    "ТЕЛ": "phone_number",                  # 6
+    "ЕЛ.ПОШТА": "email",             # 7
+    "СОЦМЕРЕЖІ": "social",            # 8
+    "ПАСПОРТ": "passport",              # 9
+    "СЕРІЯ": "series",                # 10
+    "ІД": "id_number"                    # 11
+}
+
+
 AVAILABLE_FORMATS = ['.csv', '.xls/.xlsx', '.txt']
 PHOTO_FORMATS = ['jpeg', 'jpg', 'png', 'bmp']
 csv_path = __file__.replace('parsers.py', 'person_info.csv')
@@ -99,7 +119,7 @@ class Person(Base):
 
     id = Column(Integer, Sequence('user_id_seq'), primary_key=True)
     fullname = Column(String(60), unique=True)
-    birth = Column(DateTime, nullable=True)
+    birth = Column(String(12), nullable=True)
     address = Column(String(120), nullable=True)
     workplace = Column(String(100), nullable=True)
     position = Column(String(60), nullable=True)
@@ -117,7 +137,7 @@ class Person(Base):
     def to_list(self):
         return [
         self.fullname,
-        str(self.birth),
+        self.birth,
         self.address,
         self.workplace,
         self.position,
@@ -178,7 +198,7 @@ def update_element(updatable_list: list, input_list: list):
             else updatable_list[index]
 
 
-def find_element(data, header:list, key: str, value: str):
+def find_element(data, header: list, key: str, value: str):
 
     output_arr = []
     if len(data) == 0:
@@ -298,9 +318,8 @@ def parser(session, filename: str, engine=None, delimiter="\t"):
     elif ".txt" in filetype:
         header, data = txt_parse(filename)
     elif ".xlsx" in filetype:
-        xlsx_parse_with_pandas(filename, engine)
-
-        return True
+        flag = xlsx_parse_with_pandas(filename, engine)
+        return flag
     else:
         print(f"Parser for {filetype} has not been impemented yet.")
         return False
@@ -464,12 +483,42 @@ def to_database(data, session, header=csv_header):
 
 
 def xlsx_parse_with_pandas(filename: str, engine):
-    db = pd.read_excel(filename, header=0, sheet_name=0)
-    db_columns = set(db.columns)
-    print(db.head())
-    equal_headers = db_columns & set(csv_header)
-    dropout_columns = list(db_columns - equal_headers)
-    print(dropout_columns)
-    db = db.drop(columns=dropout_columns)
-    print(db.head())
-    db.to_sql('person_info', con=engine, if_exists='append')
+
+    # reading data from excel
+    df = pd.read_excel(filename, header=0)
+
+    # data equalization due to headers that are available
+    for header in df.columns:
+        header = header.upper()
+    df_columns = set(df.columns)
+    equal_headers = df_columns & set(csv_header)
+    dropout_columns = list(df_columns - equal_headers)
+    df = df.drop(columns=dropout_columns)
+    for column in df.columns:
+        df.rename(columns={column: header_orm[column]}, inplace=True)
+
+    # dropping duplicates from dataframe
+    df.drop_duplicates(subset="fullname")
+    params = str([column for column in df.columns]).replace("[", "").replace("]", "").replace("'", "")
+
+    if params:
+        # writing data to database
+        df.to_sql('temp_person_info', con=engine, if_exists='replace', chunksize=10000, index=False)
+        print(params)
+        # merging information from temporary table to an existing
+        sql = f"""
+                INSERT INTO person_info
+                  ({params})
+                SELECT DISTINCT *
+                  FROM temp_person_info source
+                  WHERE NOT EXISTS(select fullname from person_info)
+                 GROUP BY source.fullname;
+            """
+
+        with engine.begin() as conn:  # TRANSACTION
+            # conn.execute("DROP TABLE temp_person_info")
+            conn.execute(sql)
+            conn.execute("DROP TABLE temp_person_info")
+        return True
+    else:
+        return False
