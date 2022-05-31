@@ -4,6 +4,7 @@ from openpyxl import load_workbook
 import xlsxwriter
 import json
 import re
+from database_operations import db_ops
 import pandas as pd
 from datetime import datetime, date
 from sqlalchemy.orm import declarative_base
@@ -13,8 +14,8 @@ from sqlalchemy import (
     Integer,
     Sequence,
     String,
-    DateTime,
 )
+
 """
     "CREATE TABLE IF NOT EXISTS {db_name}.{table_name} ( \
                     #   id int(11) NOT NULL AUTO_INCREMENT, \
@@ -113,43 +114,6 @@ class User:
     def to_json(self):
         return self.__dict__
 
-
-class Person(Base):
-    __tablename__ = 'person_info'
-
-    id = Column(Integer, Sequence('user_id_seq'), primary_key=True)
-    fullname = Column(String(60), unique=True)
-    birth = Column(String(12), nullable=True)
-    address = Column(String(120), nullable=True)
-    workplace = Column(String(100), nullable=True)
-    position = Column(String(60), nullable=True)
-    phone_number = Column(String(60), nullable=True)
-    email = Column(String(100), nullable=True)
-    social = Column(String(200), nullable=True)
-    passport = Column(String(60), nullable=True)
-    series = Column(String(60), nullable=True)
-    id_number = Column(String(60), nullable=True)
-
-
-    def __repr__(self):
-        return f"<{self.__dict__}>"
-
-    def to_list(self):
-        return [
-        self.fullname,
-        self.birth,
-        self.address,
-        self.workplace,
-        self.position,
-        self.phone_number,
-        self.email,
-        self.social,
-        self.passport,
-        self.series,
-        self.id_number
-]
-
-
 def user_init(data: dict):
     return User(data['username'], data['PIN'], data['telegram_id'], data['admin'])
 
@@ -162,10 +126,10 @@ def parse_users():
     return users
 
 
-def users_write(userslist: list):
+def config_write(userslist: list, filename: str):
     json_list = [user.to_json() for user in userslist]
-    with open('allowed_users.json', "w", encoding="utf-8") as file:
-        json.dump(json_list, file)
+    with open(filename, "w", encoding="utf-8") as file:
+        json.dump(json_list, file, indent=4)
 
 
 def write_csv(data: list, header=csv_header, path=csv_path):
@@ -210,45 +174,9 @@ def find_element(data, header: list, key: str, value: str):
     return (output_arr, data.index(output_arr[0])) if len(output_arr) > 0 else (None, None)
 
 
-def list_to_text(person: Person, header=csv_header):
-    data = person.to_list()
-    reply_text = f"ПІБ: {data[0]}\n"
-    for index, header_index in zip(range(1, len(data)), range(1, len(csv_header))):
-        text = f"{csv_header[header_index]}: {data[index]}\n" if data[index] is not None \
-                                                                 and data[index] != 'None' else ""
-        reply_text += text
-    return reply_text
+def get_info_by_parameter(key: str, value: str, table_group: str):
 
-
-def get_info_by_parameter(key: str, value: str,  session):
-    print(f"{key}:{value}")
-    person = None
-    search_value = f"%{value}%"
-    if key == "ПІБ":
-        person = session.query(Person).filter(Person.fullname.like(search_value)).all()
-    elif key == "Адреса":
-        person = session.query(Person).filter(Person.address.like(search_value)).all()
-    elif key in "Місце роботи/служби":
-        person = session.query(Person).filter(Person.workplace.like(search_value)).all()
-    elif key in "Посада/Звання":
-        person = session.query(Person).filter(Person.position.like(search_value)).all()
-    elif key in "Телефон":
-        person = session.query(Person).filter(Person.phone_number.like(search_value)).all()
-    elif key in "ІНПП":
-        person = session.query(Person).filter(Person.id_number.like(search_value)).all()
-    else:
-        return "Ключа не знайдено"
-
-    if type(person) == list and len(person) > 1:
-        return [element.to_list() for element in person]
-
-    if type(person) == list and len(person) == 1:
-        return list_to_text(person[0])
-
-    elif type(person) == Person:
-        return list_to_text(person)
-
-    return "Інформації не знайдено."
+    pass
 
 
 def write_xlsx(filename: str, data: list, header=csv_header):
@@ -309,23 +237,22 @@ def sites_parse(data: str):
 
 
 # general parsing choice
-def parser(session, filename: str, engine=None, delimiter="\t"):
+def parser(filename: str, table_group_name: str, append_choice: bool, delimiter="\t"):
 
     filetype = filename[len(filename)-5:len(filename)]
 
     if ".csv" in filetype:
         header, data = csv_parse(filename)
-    elif ".txt" in filetype:
-        header, data = txt_parse(filename)
+        df = pd.read_csv(filename)
+
     elif ".xlsx" in filetype:
-        flag = xlsx_parse_with_pandas(filename, engine)
+        df = pd.read_excel(filename, header=0)
+        flag = db_ops.upload_data(df,  table_group_name, table_name=filename[:filename.find('.')], append_choise=append_choice)
         return flag
+
     else:
         print(f"Parser for {filetype} has not been impemented yet.")
         return False
-
-    flag = to_database(data, session, header)
-    return flag
 
 
 # db parser
@@ -357,27 +284,6 @@ def txt_parse(filename: str, delimiter='\t'):
         header = reader[0].split(delimiter)
         data = [element.split(delimiter) for element in reader[1:]]
     return header, data
-
-
-# json_parser
-# def json_parse(filename: str):
-#     with open(filename, 'r') as file:
-#         json_data = json.load(file)
-#
-#     pass
-
-
-# xlsx parser
-def xlsx_parse(filename: str):
-
-    workbook = load_workbook(filename=filename)
-    for sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
-        data = []
-        for row in sheet.rows:
-            row_list = [cell.value for cell in row if not isinstance(cell, openpyxl.cell.cell.MergedCell)]
-            data.append(row_list)
-        return data[0], data[1:]
 
 
 # writing to csv
@@ -431,94 +337,3 @@ def to_csv(data: list, out_file=csv_path, header=csv_header):
     write_csv(csv_data, csv_header)
 
     return True
-
-
-def to_database(data, session, header=csv_header):
-    print("Sending data to database...")
-    # data standardize
-    upper_header = [element.upper().strip() for element in header]
-
-    # reorganizing data
-    csv_data = []
-    for element in data:
-        csv_element = []
-        for header_element in csv_header:
-            header_element_upper = header_element.upper()
-            if header_element_upper in upper_header:
-                data_element = element[upper_header.index(header_element_upper)].strip() if type(element) == str \
-                    else element[upper_header.index(header_element_upper)]
-                csv_element.append(data_element)
-            else:
-                csv_element.append(None)
-
-        if csv_element[0] == 'None':
-            continue
-
-        if csv_element not in csv_data:
-            csv_data.append(csv_element)
-        if len(csv_data) // 1000 == 0:
-            print(f"Розмір даних: {len(csv_data)} записів")
-    for element in csv_data:
-        print(element)
-        data = session.query(Person).filter().all()
-        person_from_db = session.query(Person).filter_by(fullname=element[0]).first()
-        session.commit()
-        if not person_from_db and element[0] != None:
-            person = Person(
-                fullname=element[0],
-                birth=element[1],
-                address=element[2],
-                workplace=element[3],
-                position=element[4],
-                phone_number=element[5],
-                email=element[6],
-                social=element[7],
-                passport=element[8],
-                series=element[9],
-                id_number=element[10],
-            )
-            session.add(person)
-            session.commit()
-    return True
-
-
-def xlsx_parse_with_pandas(filename: str, engine):
-
-    # reading data from excel
-    df = pd.read_excel(filename, header=0)
-
-    # data equalization due to headers that are available
-    for header in df.columns:
-        header = header.upper()
-    df_columns = set(df.columns)
-    equal_headers = df_columns & set(csv_header)
-    dropout_columns = list(df_columns - equal_headers)
-    df = df.drop(columns=dropout_columns)
-    for column in df.columns:
-        df.rename(columns={column: header_orm[column]}, inplace=True)
-
-    # dropping duplicates from dataframe
-    df.drop_duplicates(subset="fullname")
-    params = str([column for column in df.columns]).replace("[", "").replace("]", "").replace("'", "")
-
-    if params:
-        # writing data to database
-        df.to_sql('temp_person_info', con=engine, if_exists='replace', chunksize=10000, index=False)
-        print(params)
-        # merging information from temporary table to an existing
-        sql = f"""
-                INSERT INTO person_info
-                  ({params})
-                SELECT DISTINCT *
-                  FROM temp_person_info source
-                  WHERE NOT EXISTS(select fullname from person_info)
-                 GROUP BY source.fullname;
-            """
-
-        with engine.begin() as conn:  # TRANSACTION
-            # conn.execute("DROP TABLE temp_person_info")
-            conn.execute(sql)
-            conn.execute("DROP TABLE temp_person_info")
-        return True
-    else:
-        return False

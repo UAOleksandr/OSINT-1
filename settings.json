@@ -1,1 +1,9 @@
-[{"TOKEN":"5289743701:AAHakRDehtSxxEY5zIMDLlFHyPlJ6qYhmmU", "MEGA_LOGIN": "zheglov824@gmail.com", "MEGA_PASSWD": "Qwerty123456"}]
+[
+  {
+    "TOKEN":"5289743701:AAHakRDehtSxxEY5zIMDLlFHyPlJ6qYhmmU",
+    "MEGA_LOGIN": "zheglov824@gmail.com",
+    "MEGA_PASSWD": "Qwerty123456",
+    "apiUrl": "https://search4faces.com/api/json-rpc/v1",
+    "apiKey": "a17a88-818606-dba935-3fa2b3-e39076"
+  }
+]

@@ -3,31 +3,30 @@ import json
 import base64
 
 # запит для перевірки поточного статусу API 
-'''
+
 apiUrl = "https://search4faces.com/api/json-rpc/v1"
 apiKey = "a17a88-818606-dba935-3fa2b3-e39076"
-headers = ({'content-type': 'application/json',
-            "x-authorization-token": apiKey})
+
+def api_s4f_check(apiUrl, apiKey):
+    headers = ({'content-type': 'application/json',
+                "x-authorization-token": apiKey})
+        
+    payload = {
+            
+        "jsonrpc": "2.0",
+         "method": "rateLimit",
+        "id": "some-id",
+        "params": {}
+            
+        }
+    response = requests.post(
+        apiUrl, data=json.dumps(payload), headers=headers).json()
     
-payload = {
-        
-    "jsonrpc": "2.0",
-     "method": "rateLimit",
-    "id": "some-id",
-    "params": {}
-        
-    }
-response = requests.post(
-    apiUrl, data=json.dumps(payload), headers=headers).json()
+    return response['result']
 
-print(response['result'])
-'''
-
-def search_face(face_parameter, image_name):
+def search_face(face_parameter, image_name, apiUrl, apiKey):
     global solution
     solution = ''
-    apiUrl = "https://search4faces.com/api/json-rpc/v1"
-    apiKey = "a17a88-818606-dba935-3fa2b3-e39076"
     headers = ({'content-type': 'application/json',
                "x-authorization-token": apiKey})
     # Example echo method
@@ -56,15 +55,13 @@ def search_face(face_parameter, image_name):
         i = i+1
     #df = pd.DataFrame(response["result"]["profiles"])
 
-def photo_search(imgname):
+def photo_search(imgname, apiUrl, apiKey):
    
     try:
         file_name_img = imgname
         with open(file_name_img, 'rb') as f:
             data = f.read()
         image_64_encode = base64.b64encode(data).decode("ascii")
-        apiUrl = "https://search4faces.com/api/json-rpc/v1"
-        apiKey = "a17a88-818606-dba935-3fa2b3-e39076"
 
         # токен даю поки свій, але бажано отримати новий
         headers = ({'content-type': 'application/json',
@@ -92,5 +89,7 @@ def photo_search(imgname):
     return solution
 
 
-    
+apiUrl = "https://search4faces.com/api/json-rpc/v1"
+apiKey = "a17a88-818606-dba935-3fa2b3-e39076"  #76
+print(api_s4f_check(apiUrl, apiKey))
 

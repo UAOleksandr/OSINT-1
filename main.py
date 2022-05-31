@@ -1,3 +1,5 @@
+import pandas as pd
+
 import parsers
 import apiS4F as S4f
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, Chat, Bot
@@ -11,12 +13,11 @@ from telegram.ext import (
 )
 import random
 from parsers import User
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from ocr import ocr
 import os
 from mega import Mega
 import json
+from database_operations import db_ops
 
 
 FILENAME = "settings.json"
@@ -24,11 +25,19 @@ FILENAME = "settings.json"
 # list of necessary variables
 authorized_users = []
 settings = {}
+created_user = None
+created_user_admin_flag = False
+created_user_parameter = None
+table_group_name = ""
+tablegroups_path = "database_operations/tablegroups.json"
+table_groups = db_ops.read_tablegroups(tablegroups_path)
+append_choise_text = ""
+parameter_dict = {}
+pragma = {}
 
 # Database necessary variables
 session = None
 engine = None
-
 
 db_record = []
 solution = ""  # variable for photo_search
@@ -41,60 +50,28 @@ active_user = []  # list of users, that are operating in bot
 # regular expressions for handlers
 choise_regex = 'Ввід інформації|Пошук інформації|Інструкція'
 command_regex = ['Вручну', 'У вигляді файлу']
-output_regex = "ПІБ|Адреса|Телефон|Місце роботи/служби|Посада/Звання|ІНПН|Пошук особи за фотографією|Вихід"
+output_regex = "Пошук у базі бота|Пошук особи за фотографією|Вихід"
 error_msg = "Сталась помилка під час використання бота. Радимо натиснути /cancel та почати роботу заново. Просимо вибачення за помилку"
 bot_log = "bot.log"
 parameter = ""
-full_name = None
-birthday = None
-address = None
-works_name = None
-military_position = None
-telephone_number = None
-email_post = None
-social_network = None
-pasport_info = None
-seria_pasport = None
-personal_id = None
 
 
 # Handler constants
 ADMIN_PANEL, ADMIN_CHOISE, AUTHORIZATION, MAIN_MENU, IO_CHOISE, INSERTION_MODE, FILE_INSERTION,  GET_PARAMETER, \
     GET_INFO, USER_ADDING, USER_DELETING, INSTRUCTION, TELEPHONE, UPLOAD_TO_MEGA, \
-    CONTINUE, PHOTO_INSERTION, INFO_CONFIRMATION, INFO_CORRECTION, LINK_INSERTION, LOG_CHOICE = range(20)
+    CONTINUE, PHOTO_INSERTION, INFO_CONFIRMATION, INFO_CORRECTION, LINK_INSERTION, LOG_CHOICE, \
+    USER_INFO_CONFIRMATION, USER_INFO_CORRECTION, S4F_TOKEN_INSERTION, TABLE_GROUP_SELECTION, \
+    TABLE_GROUP_STRUCTURE, APPEND_CHOICE, PARAMETER_CONFIRMATION, PARAMETER_CORRECTION, TABLE_GROUP_INPUT_SELECTION = range(29)
 
 
 # bot functions
-def print_info():
-    global full_name, birthday, address, works_name, military_position, telephone_number, email_post, social_network
-    global pasport_info, seria_pasport, personal_id
-    output_str = ""
-    if full_name is not None:
-        output_str += parsers.csv_header[0] + ': ' + full_name + '\n'
-    if birthday is not None:
-        output_str += parsers.csv_header[1] + ': ' + birthday + '\n'
-    if address is not None:
-        output_str += parsers.csv_header[2] + ': ' + address + '\n'
-    if works_name is not None:
-        output_str += parsers.csv_header[3] + ': ' + works_name + '\n'
-    if military_position is not None:
-        output_str += parsers.csv_header[4] + ': ' + military_position + '\n'
-    if telephone_number is not None:
-        output_str += parsers.csv_header[5] + ': ' + telephone_number + '\n'
-    if email_post is not None:
-        output_str += parsers.csv_header[6] + ': ' + email_post + '\n'
-    if social_network is not None:
-        output_str += parsers.csv_header[7] + ': ' + social_network + '\n'
-    if pasport_info is not None:
-        output_str += parsers.csv_header[8] + ': ' + pasport_info + '\n'
-    if seria_pasport is not None:
-        output_str += parsers.csv_header[9] + ': ' + seria_pasport + '\n'
-    if personal_id is not None:
-        output_str += parsers.csv_header[10] + ': ' + personal_id + '\n'
-    return output_str
+def return_user(telegram_id) -> parsers.User:
+    for user in authorized_users:
+        if telegram_id == user.telegram_id:
+            return user
 
 
-def parse_file(file: str):
+def parse_file(file: str, table_group_name: str, append_choise=True):
     msg = ""
     filetype = file[len(file) - 5:len(file)]
     print(filetype)
@@ -122,7 +99,8 @@ def parse_file(file: str):
     else:
         flag = False
         if file:
-            flag = parsers.parser(session, file, engine)
+            parsers.parser(file, table_group_name, append_choice=append_choise)
+            flag = True
     if file:
         os.system(f"DEL {file}")
     if flag:
@@ -142,7 +120,6 @@ def start(update: Update, context: CallbackContext) -> int:
     sender = update.message.from_user
 
     global authorized_users
-    authorized_users = parsers.parse_users()
     global user_iDs
     user_iDs = [user.telegram_id for user in authorized_users]
 
@@ -195,7 +172,7 @@ def authorization(update: Update, context: CallbackContext) -> int:
                     ]
 
                 # Поштаріца check
-                if sender.id == 740945761:
+                if sender.id == 740945761 or "Поштаріца" in f"{sender.first_name} {sender.last_name}":
                     with open("Poshtaritsa.png", "rb") as photo:
                         update.message.reply_photo(photo)
                 else:
@@ -207,7 +184,7 @@ def authorization(update: Update, context: CallbackContext) -> int:
                     ),
                 )
                 # parsers.refresh_logs()
-                parsers.log_event(f"Користувач {user.first_name} ({user.telegram_id}) здійснив вхід до системи;")
+                parsers.log_event(f"Користувач {user.username} ({user.telegram_id}) здійснив вхід до системи;")
                 active_user.append(sender.id)
                 return IO_CHOISE
     update.message.reply_text("Автентифікація провалена. Спробуйте ще раз")
@@ -221,7 +198,7 @@ def admin_choise(update: Update, context: CallbackContext) -> int:
     if text == 'Адміністрування':
         reply_keyboard = reply_keyboard = [
             ['Додавання користувача', 'Видалення користувача'],
-            ['Вивантаження БД', 'Вивантаження логів'],
+            ['Вивантаження БД', 'Вивантаження логів', 'Перевірка токена S4F'],
             ['Назад до адмін-меню', 'Вихід']
         ]
         update.message.reply_text(
@@ -275,6 +252,7 @@ def admin_choise(update: Update, context: CallbackContext) -> int:
 
 def admin_panel(update: Update, context: CallbackContext) -> int:
     global authorized_users
+    global settings
     text = update.message.text
 
     if "Додавання користувача" in text:
@@ -329,7 +307,7 @@ def admin_panel(update: Update, context: CallbackContext) -> int:
         m = mega.login(settings["MEGA_LOGIN"], settings["MEGA_PASSWD"])
         file = m.upload("osint_database.db")
         update.message.reply_text(f"Посилання на БД: {m.get_upload_link(file)}")
-        reply_keyboard = [['Адміністрування', 'Введення/Пошук інформації', 'Вихід']]
+        reply_keyboard = [['Адміністрування', 'Введення/Пошук інформації'], ['Вихід']]
         update.message.reply_text("Виберіть подальшу дію",
                                   reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
                                         resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
@@ -337,10 +315,37 @@ def admin_panel(update: Update, context: CallbackContext) -> int:
         )
         return ADMIN_CHOISE
 
+    elif "Перевірка токена S4F" in text:
+
+
+        response = S4f.api_s4f_check(settings["apiUrl"], settings["apiKey"])
+        err = "Токен не є дійсним"
+        try:
+            if int(response["remaining"]) <= 0:
+                err = "Кількість можливих спроб є вичерпаною"
+                raise Exception(err)
+
+            reply_keyboard = [
+                ['Додавання користувача', 'Видалення користувача'],
+                ['Вивантаження БД', 'Вивантаження логів', 'Перевірка токена S4F'],
+                ['Назад до адмін-меню', 'Вихід']
+            ]
+            update.message.reply_text(
+                f"Кількість доступних пошуків: {response['remaining']}",
+                reply_markup=ReplyKeyboardMarkup(
+                    reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                    input_field_placeholder='Здійсніть вибір...'
+                ),
+            )
+            return ADMIN_PANEL
+        except Exception as e:
+            update.message.reply_text(f"{err}. Введіть його значення")
+            return S4F_TOKEN_INSERTION
+
 
 def user_adding(update: Update, context: CallbackContext) -> int:
-    user = update.message.contact
-    print(user)
+    sended_contact = update.message.contact
+    # print(created_user)
     global authorized_users
 
     pin_list = [usr.PIN for usr in authorized_users]
@@ -351,35 +356,158 @@ def user_adding(update: Update, context: CallbackContext) -> int:
         if PIN not in pin_list:
             break
 
-    # appending user to the list
-    authorized_users.append(User(user.first_name, PIN, user.user_id, False))
-    parsers.users_write(authorized_users)
-    reply_keyboard = [['Додавання користувача', 'Видалення користувача'], ['Вивантаження БД'], ['Назад до адмін-меню', 'Вихід']]
-    update.message.reply_text(f" Користувача {user.first_name} із телеграм ІД  " +
-                              f"{user.user_id} було додано до списку користувачів. Його PIN: {PIN}",
+    global created_user
+    global created_user_admin_flag
+    created_user = User(f"{sended_contact.first_name} {sended_contact.last_name}",
+                        PIN, sended_contact.user_id, created_user_admin_flag)
+
+    reply_keyboard = [
+        ['Занести користувача до бази'],
+        ["Ім'я користувача", "PIN", "Телеграм ID", "Роль"],
+        ['Назад до адмін-меню', 'Вихід']]
+    update.message.reply_text(f"""Із надісланого контакту вдалось отримати наступну інформацію:
+1. Ім'я користувача: {created_user.username};
+2. PIN користувача: {created_user.PIN};
+3. Телеграм ID користувача: {created_user.telegram_id};
+4. Роль користувача: {"Адміністратор" if created_user_admin_flag else "Користувач"}""",
         reply_markup=ReplyKeyboardMarkup(
             reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
         ),
     )
-    return ADMIN_CHOISE
+    return USER_INFO_CONFIRMATION
+
+
+def user_info_confirmation(update: Update, context: CallbackContext) -> int:
+
+    # getting parameter
+    global created_user
+    choice = update.message.text
+
+    if choice == 'Занести користувача до бази':
+        error_flag = False
+        if created_user is None:
+            update.message.reply_text("Неможливо внести порожнього користувача")
+        elif (not created_user.username) or (not created_user.telegram_id):
+            error_flag = True
+            update.message.reply_text(
+                f"""Неможливо занести до бази користувача без наявного {"ПІБ" if created_user.telegram_id else "телеграм ID"}.
+Здійсніть коригування даних або поверніться у попереднє меню""")
+
+
+        if error_flag:
+            reply_keyboard = [['1', '2', '3', '4'], ['Назад до адмін-меню', 'Вихід']]
+            update.message.reply_text(f"""1. Ім'я користувача: {created_user.username};
+2. PIN користувача: {created_user.PIN};
+3. Телеграм ID користувача: {created_user.telegram_id};
+4. Роль користувача: {"Адміністратор" if created_user_admin_flag else "Користувач"}""",
+                                           reply_markup=ReplyKeyboardMarkup(
+                                              reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                                               input_field_placeholder='Здійсніть вибір...'
+                                         )
+                                )
+
+        else:
+            authorized_users.append(created_user)
+            parsers.config_write(authorized_users, "allowed_users.json")
+            reply_keyboard = [
+            ['Додавання користувача', 'Видалення користувача'],
+            ['Вивантаження БД', 'Вивантаження логів', 'Перевірка токена S4F'],
+            ['Назад до адмін-меню', 'Вихід']
+        ]
+            update.message.reply_text(f""" Користувача {created_user.username} із телеграм ІД \
+{created_user.telegram_id} було додано до списку користувачів. Його PIN: {created_user.PIN}""",
+        reply_markup=ReplyKeyboardMarkup(
+            reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
+        ),
+    )
+            created_user = None
+            return ADMIN_PANEL
+
+    else:
+
+        global created_user_parameter
+        created_user_parameter = choice
+        update.message.reply_text("Введіть значення параметру")
+        if choice == "Роль":
+            reply_keyboard = [["Адміністратор"], ["Користувач"]]
+            update.message.reply_text("Виберіть значення параметра за допомогою клавіатури",
+                                      reply_markup=ReplyKeyboardMarkup(
+                                          reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                                          input_field_placeholder='Здійсніть вибір...'
+                                      )
+                                      )
+        return USER_INFO_CORRECTION
+
+
+def user_info_correction(update: Update, context: CallbackContext) -> int:
+
+    parameter_value = update.message.text
+    global created_user_parameter
+    global created_user
+
+    if created_user_parameter == "Ім'я користувача":
+        created_user.username = parameter_value
+
+    elif created_user_parameter == "PIN":
+
+        if not (str(parameter_value).isdigit()):
+            error_flag = True
+            update.message.reply_text("PIN невірну форму(наявні нецифрові символи). Внесіть значення заново")
+            return USER_INFO_CORRECTION
+        else:
+            created_user.PIN = int(parameter_value)
+
+    elif created_user_parameter == "Телеграм ID":
+
+        if not(str(parameter_value).isdigit()):
+            error_flag = True
+            update.message.reply_text("Телеграм ID має невірну форму(наявні нецифрові символи). Внесіть значення заново")
+            return USER_INFO_CORRECTION
+
+        else:
+            created_user.telegram_id = int(parameter_value)
+
+    elif created_user_parameter == "Роль":
+        created_user.admin = True if parameter_value == "Адміністратор" else False
+
+    reply_keyboard = [
+        ['Занести користувача до бази'],
+        ["Ім'я користувача", "PIN", "Телеграм ID", "Роль"],
+        ['Назад до адмін-меню', 'Вихід']]
+    update.message.reply_text(f"""Із надісланого контакту вдалось отримати наступну інформацію:
+    1. Ім'я користувача: {created_user.username};
+    2. PIN користувача: {created_user.PIN};
+    3. Телеграм ID користувача: {created_user.telegram_id};
+    4. Роль користувача: {"Адміністратор" if created_user.admin else "Користувач"}""",
+                              reply_markup=ReplyKeyboardMarkup(
+                                  reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                                  input_field_placeholder='Здійсніть вибір...'
+                              ),
+                              )
+    return USER_INFO_CONFIRMATION
 
 
 def user_deleting(update: Update, context: CallbackContext) -> int:
     global authorized_users
     msg = update.message.text
-    PIN = int(msg)
-    for user in authorized_users:
-        if PIN == user.PIN:
-            update.message.reply_text(f"Користувача {user.username}({user.telegram_id}) із PIN {user.PIN} було видалено.")
-            authorized_users.pop(authorized_users.index(user))
-            parsers.users_write(authorized_users)
-    reply_keyboard = [['Додавання користувача', 'Видалення користувача'], ['Вивантаження БД'], ['Назад до адмін-меню', 'Вихід']]
+    PIN = msg
+    if PIN.isdigit():
+        for user in authorized_users:
+            if int(PIN) == user.PIN:
+                update.message.reply_text(f"Користувача {user.username}({user.telegram_id}) із PIN {user.PIN} було видалено.")
+                authorized_users.pop(authorized_users.index(user))
+                parsers.config_write(authorized_users, "allowed_users.json")
+    reply_keyboard = [
+            ['Додавання користувача', 'Видалення користувача'],
+            ['Вивантаження БД', 'Вивантаження логів', 'Перевірка токена S4F'],
+            ['Назад до адмін-меню', 'Вихід']
+        ]
     update.message.reply_text("Ваші подальші дії",
         reply_markup=ReplyKeyboardMarkup(
             reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
         ),
     )
-    return ADMIN_CHOISE
+    return ADMIN_PANEL
 
 
 def log_choice(update: Update, context: CallbackContext) -> int:
@@ -395,17 +523,35 @@ def log_choice(update: Update, context: CallbackContext) -> int:
 
 
     # Sending log to administrator
-    with open(filename, "rb") as document:
-        update.message.reply_document(document)
+    try:
+        with open(filename, "rb") as document:
+            update.message.reply_document(document)
+        if filename == "bot.log":
+            with open(filename, "w", encoding="utf-8") as file:
+                file.write("")
+    except Exception as e:
+        update.message.reply_text("Обраний лог є порожнім, отож його завантаження є неможливим")
 
     # Flushing bot.log if bot logging was chosen
-    if filename == "bot.log":
-        with open(filename, "w", encoding="utf-8") as file:
-            file.write("")
+
 
     reply_keyboard = [['Продовжити роботу'], ['Вихід']]
     update.message.reply_text(
         'Виберіть одну із опцій',
+        reply_markup=ReplyKeyboardMarkup(
+            reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+            input_field_placeholder='Здійсніть вибір...'
+        ),
+    )
+    return CONTINUE
+
+
+def s4f_token_insertion(update: Update, context: CallbackContext) -> int:
+    settings["apiKey"] = update.message.text
+    parsers.config_write([settings], "settings.json")
+    reply_keyboard = [['Продовжити роботу'], ['Вихід']]
+    update.message.reply_text(
+        'Токен успішно змінено. Виберіть одну із опцій',
         reply_markup=ReplyKeyboardMarkup(
             reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
             input_field_placeholder='Здійсніть вибір...'
@@ -464,8 +610,7 @@ def io_choise(update: Update, context: CallbackContext) -> int:
 
     else:
         reply_keyboard = [
-            ['ПІБ', 'Адреса', 'Телефон'],
-            ['Місце роботи/служби', 'Посада/Звання', 'ІНПН'],
+            ['Пошук у базі бота'],
             ['Пошук особи за фотографією'],
             ['Назад до вибору режиму'], ["Вихід"]
         ]
@@ -480,8 +625,7 @@ def io_choise(update: Update, context: CallbackContext) -> int:
 
 def insertion_mode(update: Update, context: CallbackContext) -> int:
     user = update.message.from_user
-
-
+    global table_groups
     if 'посилання' in update.message.text:
         reply_keyboard = [["Назад до вводу"]]
         update.message.reply_text("Надішліть посилання на файл, що зберігається на файлообміннику MEGA",
@@ -490,66 +634,43 @@ def insertion_mode(update: Update, context: CallbackContext) -> int:
         return LINK_INSERTION
 
     if 'Вручну' in update.message.text:
-        user_data = print_info()
 
-        # data_erase before entering info
+        global parameter_dict
+        parameter_dict = {}
+        # print(table_groups)
+        if table_groups:
+            return_msg = ""
+            if table_groups:
+                for key, index in zip(table_groups.keys(), range(len(table_groups))):
+                    return_msg += f"{index + 1}. {key};\n"
+            reply_keyboard = [["Назад до вибору режиму"]]
+            update.message.reply_text(f"""
+На даний момент часу існують наступні групи:
+{return_msg} Введіть цифру необхідної групи для додавання інформації.""",
+                reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True))
 
-        full_name = None
-        birthday = None
-        address = None
-        works_name = None
-        military_position = None
-        telephone_number = None
-        email_post = None
-        social_network = None
-        pasport_info = None
-        seria_pasport = None
-        personal_id = None
+            return TABLE_GROUP_INPUT_SELECTION
 
-        if len(user_data) < 1:
-            update.message.reply_text("Здійсніть введення даних")
-        else:
-            update.message.reply_text(f"Наступні дані будуть занесені до БД:\n{user_data}")
-
-        reply_keyboard = [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10', '11', '0'], ["Назад до вводу"]]
-
-        # text for choosing
-        choise_msg = "0. Занести дані до БД\n"
-        for i in range(1, len(parsers.csv_header) + 1):
-            choise_msg += f"{str(i)}. {parsers.csv_header[i - 1]}"
-            if i != len(parsers.csv_header):
-                choise_msg += "\n"
-
-        update.message.reply_text(
-            'Оберіть необхідний критерій:\n' + choise_msg,
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
-            ),
-        )
-        return INFO_CONFIRMATION
 
     elif 'У вигляді файлу' in update.message.text:
         update.message.reply_text(
 f"""
-Активовано режим надсилання файлів.
 Наразі доступна обробка наступних типів:
 {parsers.available_formats()}
             """,
             reply_markup=ReplyKeyboardRemove()
     )
-        update.message.reply_text(
-f'''
-Перед надсиланням файлів просимо перевірити наявність заголовків.
-Перелік припустимих заголовків:
-{parsers.available_headers()}
-'''
-    )
-        reply_keyboard=[["Назад до вводу"]]
-        update.message.reply_text("Надішліть файл",
+        reply_keyboard = [["До нової групи"]]
+
+        if table_groups:
+            reply_keyboard.append(["До існуючої групи"])
+
+        reply_keyboard.append(["Назад до вводу"])
+        update.message.reply_text("Додати дані до",
                                   reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
                                                                    resize_keyboard=True)
                                   )
-        return FILE_INSERTION
+        return TABLE_GROUP_SELECTION
 
     elif 'зображення' in update.message.text:
         reply_keyboard = [["Назад до вводу"]]
@@ -560,16 +681,143 @@ f'''
         return PHOTO_INSERTION
 
 
+def table_group_selection(update: Update, context: CallbackContext):
+    msg = update.message.text
+    global table_groups
+    # print(table_groups)
+    if table_groups and msg == "До існуючої групи":
+
+        return_msg = ""
+        if table_groups:
+            for key, index in zip(table_groups.keys(), range(len(table_groups))):
+                return_msg += f"{index+1}. {key};\n"
+        reply_keyboard = [["Назад до вибору режиму"]]
+        update.message.reply_text(
+            f"""
+На даний момент часу існують наступні групи:
+{return_msg} Введіть цифру необхідної групи для надсилання файлу.""",
+            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,resize_keyboard=True))
+
+    else:
+        reply_keyboard = [["Назад до вибору режиму"]]
+        update.message.reply_text("Введіть назву групи", reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+
+    return TABLE_GROUP_STRUCTURE
+
+
+def table_group_structure(update: Update, context: CallbackContext):
+
+    global table_groups
+    global table_group_name
+    tables_list = list(table_groups.keys())
+    message = update.message.text
+    reply_keyboard = [["Додати як нову таблицю", "Додати лише дані"], ["Назад до вибору режиму"]]
+    if message.isdigit():
+
+        table_group_name = tables_list[int(message)-1]
+        print(table_group_name)
+    else:
+        table_group_name = message
+
+    fields = db_ops.get_fieldnames_for_tables(table_group_name, tablegroups_path)
+
+    if fields is str or table_group_name not in tables_list:
+        update.message.reply_text("Схоже, що таблиць в цій групі ще немає.")
+        table_groups.update({table_group_name: []})
+        db_ops.write_tablegroups(table_groups, tablegroups_path)
+        update.message.reply_text("Виберіть одну із опцій",
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+        return APPEND_CHOICE
+
+    else:
+        pragma = {}
+        additional_list = []
+        for element in fields.values():
+            additional_list.extend(element)
+        additional_list = list(dict.fromkeys(additional_list))
+        for key in additional_list:
+            pragma.update({additional_list.index(key): key})
+
+        update.message.reply_text(f"Наступні заголовки є присутніми для даної групи таблиць:{pragma}")
+
+    update.message.reply_text("Виберіть одну із опцій",
+                              reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                               resize_keyboard=True))
+    return APPEND_CHOICE
+
+
+def table_group_input_selection(update: Update, context: CallbackContext):
+    global table_group_name
+    message = update.message.text
+    print(message)
+    tables_list = list(table_groups.keys())
+    if message.isdigit():
+        table_group_name = tables_list[int(message)-1]
+    else:
+        table_group_name = message
+    fields = db_ops.get_fieldnames_for_tables(table_group_name, tablegroups_path)
+    if fields is str or table_group_name not in tables_list:
+        update.message.reply_text("Схоже, що таблиць в цій групі ще немає. Зверніться до адміністратора із проханням створити групу")
+        table_groups.update({table_group_name: []})
+        reply_keyboard = [["Продовжити роботу", "Вихід"]]
+        db_ops.write_tablegroups(table_groups, tablegroups_path)
+        update.message.reply_text("Виберіть одну із опцій",
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+        return CONTINUE
+
+    else:
+        global pragma
+
+        additional_list = []
+        for element in fields.values():
+            additional_list.extend(element)
+        additional_list = list(dict.fromkeys(additional_list))
+
+        if 'id' in additional_list:
+            additional_list.remove('id')
+
+        for key in additional_list:
+            pragma.update({additional_list.index(key): key})
+
+        return_msg = ""
+        for key in pragma.keys():
+            return_msg += f"{key + 1}. {pragma[key]};\n"
+
+        update.message.reply_text(f"""Наступні заголовки є присутніми для даної групи таблиць:\n{return_msg}
+Введіть індекс параметра""")
+
+        reply_keyboard = [["Занести дані до БД"], ["Назад до вибору режиму"]]
+        update.message.reply_text("Виберіть параметр, ввівши його номер",
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
+
+        return PARAMETER_CONFIRMATION
+
+
+def append_choice(update: Update, context: CallbackContext):
+    global append_choise_text
+    append_choise_text = update.message.text
+    reply_keyboard = [["Назад до вибору режиму"]]
+    update.message.reply_text("Надішліть файл",
+                              reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                               resize_keyboard=True))
+    return FILE_INSERTION
+
+
 def file_insertion(update: Update, context: CallbackContext) -> int:
     try:
         flag = False
 
-        # using database engine
-        global session
+        global table_group_name
+        global append_choise_text
+        if append_choise_text == "Додати лише дані":
+            append = False
 
         user = update.message.from_user
         file = context.bot.get_file(update.message.document).download()
-        msg = parse_file(file)
+        msg = parse_file(file, table_group_name, append)
         update.message.reply_text(msg)
         reply_keyboard = [['Продовжити роботу'], ['Вихід']]
         update.message.reply_text(
@@ -583,8 +831,10 @@ def file_insertion(update: Update, context: CallbackContext) -> int:
         update.message.reply_text(error_msg)
         parsers.log_event(e, bot_log)
 
+
 # functions for getting info from the database
 def get_parameter(update: Update, context: CallbackContext) -> int:
+
     global parameter
     parameter = update.message.text
     if "фотографією" in parameter:
@@ -592,40 +842,202 @@ def get_parameter(update: Update, context: CallbackContext) -> int:
         global photo_search_flag
         photo_search_flag = True
         return PHOTO_INSERTION
+
     else:
-        update.message.reply_text("Введіть необхідне значення")
+        return_msg = ""
+        for key, index in zip(table_groups.keys(), range(len(table_groups))):
+            return_msg += f"{index + 1}. {key};\n"
+        reply_keyboard = [["Здійснити запит", "Назад до вибору режиму"]]
+        update.message.reply_text(f"""Введіть цифру необхідної групи таблиць:
+{return_msg}""", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
     return GET_INFO
 
 
 def get_info(update: Update, context: CallbackContext) -> int:
-    global session
+
+
+    tables_list = list(table_groups.keys())
+    message = update.message.text
+    global table_group_name
+
+    if message.isdigit():
+        table_group_name = tables_list[int(message) - 1]
+        print(table_group_name)
+
+    fields = db_ops.get_fieldnames_for_tables(table_group_name, tablegroups_path)
+    print(type(fields))
+
+    if fields is str or table_group_name not in tables_list:
+        print(f"<{table_groups}>")
+        update.message.reply_text("Схоже, що таблиць в цій групі ще немає.")
+        table_groups.update({table_group_name: []})
+        print(f"<{table_groups}>")
+        db_ops.write_tablegroups(table_groups, tablegroups_path)
+        reply_keyboard = [["Продовжити роботу"], ["Вихід"]]
+        update.message.reply_text("Виберіть одну із опцій",
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                   resize_keyboard=True))
+        return CONTINUE
+
+    else:
+        global pragma
+
+        additional_list = []
+        for element in fields.values():
+            additional_list.extend(element)
+        additional_list = list(dict.fromkeys(additional_list))
+
+        if 'id' in additional_list:
+            additional_list.remove('id')
+
+        for key in additional_list:
+            pragma.update({additional_list.index(key): key})
+
+        return_msg = ""
+        for key in pragma.keys():
+            return_msg += f"{key + 1}. {pragma[key]};\n"
+
+        update.message.reply_text(f"""Наступні заголовки є присутніми для даної групи таблиць:\n{return_msg}
+Введіть індекс параметра""")
+        return PARAMETER_CONFIRMATION
+
+
+def parameter_confirmation(update: Update, context: CallbackContext):
+    global pragma
     global parameter
-    value = update.message.text
-    user = update.message.from_user
+    global parameter_dict
+    global table_group_name
+
+    text = update.message.text
+    if text == "Здійснити запит":
+        try:
+            if parameter_dict:
+                msg = get_data(tablegroups_path)
+                if msg == "Результати пошуку.txt":
+                    with open(msg, "rb") as document:
+                        update.message.reply_document(document)
+
+                else:
+                    update.message.reply_text("Параметри не задано. Введіть номер параметру")
+                    return PARAMETER_CONFIRMATION
+
+        except Exception as e:
+            parsers.log_event(e, bot_log)
+            update.message.reply_text(error_msg)
+
+        finally:
+            reply_keyboard = [["Продовжити роботу", "Вихід"]]
+            update.message.reply_text(
+                'Виберіть одну із опцій',
+                reply_markup=ReplyKeyboardMarkup(
+                    reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                    input_field_placeholder='Здійсніть вибір...'
+                ),
+            )
+            return CONTINUE
+
+
+    elif text == "Занести дані до БД":
+        try:
+            for key in parameter_dict.keys():
+                parameter_dict[key] = [parameter_dict[key]]
+            dataframe = pd.DataFrame(parameter_dict)
+            print(dataframe)
+            msg = db_ops.upload_data(df=dataframe, tablegroup=table_group_name, append_choise=True)
+            update.message.reply_text(f"{msg}")
+            parameter_dict = {}
+        except Exception as e:
+            update.message.reply_text(str(e))
+        finally:
+            reply_keyboard = [["Продовжити роботу", "Вихід"]]
+            update.message.reply_text(
+                'Виберіть одну із опцій',
+                reply_markup=ReplyKeyboardMarkup(
+                    reply_keyboard, one_time_keyboard=True, resize_keyboard=True,
+                    input_field_placeholder='Здійсніть вибір...'
+                ),
+            )
+            return CONTINUE
+
+    else:
+        if text.isdigit():
+            parameter = pragma[int(text)-1]
+            update.message.reply_text("Введіть значення параметру")
+            return PARAMETER_CORRECTION
+
+
+def parameter_correction(update: Update, context: CallbackContext):
+    global parameter_dict
+    global parameter
+    text = update.message.text
+    parameter_dict.update({parameter: text})
+    # reply_keyboard = [["Здійснити запит", "Вихід"]]
+    update.message.reply_text(f"{parameter_dict}")
+    update.message.reply_text("Введіть наступну цифру параметра або надішліть дані для пошуку")
+    return PARAMETER_CONFIRMATION
+
+
+# випиляти нахуй
+def get_data(path: str):
+
+    global parameter_dict
+    print(parameter_dict)
+    if not parameter_dict:
+        return "Список параметрів порожній"
+
+    # getting the first parameter
+    parameter = list(parameter_dict.keys())[0]
+    value = parameter_dict[parameter]
+
+    parameter_dict.pop(parameter)
 
     # getting data from database
-    data = parsers.get_info_by_parameter(parameter, value, session)
+    data, header = db_ops.get_data_from_db(parameter, value, table_group_name, path)
+    if parameter_dict:
+        for key in parameter_dict:
+            for row in list(data):
+                if parameter_dict[key] != row[header.index(key)]:
+                    data.remove(row)
 
-    if type(data) == str:
-        update.message.reply_text(data)
+    # data rectification
+    for key in list(header):
+        if header.count(key):
+            indexes = [n for n, x in enumerate(header) if x == key]
+            for index in range(1, len(indexes), -1):
+                header.pop(index)
+                for row in data:
+                    row.pop(index)
 
-    elif type(data) == list:
-        global settings
-        bot = Bot(settings["TOKEN"])
-        filename = "Результати пошуку.xlsx"
-        parsers.write_xlsx(filename, data)
-        update.message.reply_text("Знайдена інформація поміщена в документ через велику кількість даних.")
-        with open(filename, "rb") as document:
-            update.message.reply_document(document)
+    print(f"Data after rectification: {data}")
+    with open("Результати пошуку.txt", "w", encoding="utf-8") as file:
+        file.write("Результати пошуку:\n")
+        for row in data:
+            for key in header:
+                if row[header.index(key)] and key != 'id':
+                    file.write(f"{key}: {row[header.index(key)]}\n")
+            file.write("\n")
 
-    reply_keyboard = [['Продовжити роботу'], ['Вихід']]
-    update.message.reply_text(
-            'Виберіть одну із опцій',
-            reply_markup=ReplyKeyboardMarkup(
-                reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
-        ),
-    )
-    return CONTINUE
+    return "Результати пошуку.txt"
+    # if type(data) == str:
+    #     update.message.reply_text(data)
+
+    # elif type(data) == list:
+    #
+    #     global settings
+    #     filename = "Результати пошуку.xlsx"
+    #     parsers.write_xlsx(filename, data)
+    #     update.message.reply_text("Знайдена інформація поміщена в документ через велику кількість даних.")
+    #     with open(filename, "rb") as document:
+    #         update.message.reply_document(document)
+
+    # reply_keyboard = [['Продовжити роботу'], ['Вихід']]
+    # update.message.reply_text(
+    #         'Виберіть одну із опцій',
+    #         reply_markup=ReplyKeyboardMarkup(
+    #             reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
+    #     ),
+    # )
+    # return CONTINUE
 
 
 # OCR
@@ -635,12 +1047,11 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
         obj = context.bot.get_file(file)
         imgname = obj.file_path.split('/')[len(obj.file_path.split('/')) - 1]
         obj.download()
-
+        global settings
         global photo_search_flag
 
-
         if photo_search_flag:
-            solution = S4f.photo_search(imgname)
+            solution = S4f.photo_search(imgname, settings["apiUrl"], settings["apiKey"])
             os.system(f"del {imgname}")
             update.message.reply_text(solution)
             solution = ""
@@ -664,19 +1075,19 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
             data = ocr.full_info
             os.system(f"del {imgname}")
             print(f"<{data}>")
-            global full_name
-            global birthday
-            global address
-            global pasport_info
-            surname = str(data['Surname']).capitalize() if 'Surname' in data.keys() else ""
-            name = str(data['Name']).capitalize() if 'Name' in data.keys() else ""
-            patronymic = str(data['Patronymic']).capitalize() if 'Patronymic' in data.keys() else ""
-            full_name = f"{surname} {name} {patronymic}"
-            birthday = data['Born'] if 'Born' in data.keys() else None
-            address = data['Place'] if 'Place' in data.keys() else None
-            pasport_info = data['Passport'] if 'Passport' in data.keys() else None
-            update.message.reply_text(f"Наступні дані будуть занесені до БД:\n{print_info()}")
-            reply_keyboard = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['10', '11', '0']]
+            # global full_name
+            # global birthday
+            # global address
+            # global pasport_info
+            # surname = str(data['Surname']).capitalize() if 'Surname' in data.keys() else ""
+            # name = str(data['Name']).capitalize() if 'Name' in data.keys() else ""
+            # patronymic = str(data['Patronymic']).capitalize() if 'Patronymic' in data.keys() else ""
+            # full_name = f"{surname} {name} {patronymic}"
+            # birthday = data['Born'] if 'Born' in data.keys() else None
+            # address = data['Place'] if 'Place' in data.keys() else None
+            # pasport_info = data['Passport'] if 'Passport' in data.keys() else None
+            # # update.message.reply_text(f"Наступні дані будуть занесені до БД:\n{}")
+            # # reply_keyboard = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['10', '11', '0']]
 
             # text for choosing
             choise_msg = "0. Занести дані до БД\n"
@@ -684,7 +1095,7 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
                 choise_msg += f"{str(i)}. {parsers.csv_header[i-1]}"
                 if i != len(parsers.csv_header):
                     choise_msg += "\n"
-
+            reply_keyboard = [["Назад до вибору режиму"]]
             update.message.reply_text(
                 'Оберіть необхідний критерій:\n' + choise_msg,
                 reply_markup=ReplyKeyboardMarkup(
@@ -697,103 +1108,29 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
         update.message.reply_text(error_msg)
 
 
-def info_confirmation(update: Update, callback: CallbackContext) -> int:
-    try:
-        text = update.message.text
-        user = update.message.from_user
-        if text == '0':
-            send_db()
-            update.message.reply_text("Дані були занесені до БД.")
-            global db_record
-            # parsers.refresh_logs()
-            parsers.log_event(f"Користувач {user.first_name} ({user.id}) заніс до БД наступні дані: {db_record};")
-            db_record = []
-            reply_keyboard = [['Продовжити роботу'], ['Вихід']]
-            update.message.reply_text(
-                'Виберіть одну із опцій',
-                reply_markup=ReplyKeyboardMarkup(
-                    reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
-                ),
-            )
-            return CONTINUE
-        else:
-            global param
-            param = text
-            update.message.reply_text("Введіть значення параметру")
-            return INFO_CORRECTION
-    except Exception as e:
-        update.message.reply_text(error_msg)
-        parsers.log_event(e, bot_log)
-
-
-def info_correction(update: Update, callback: CallbackContext) -> int:
-    text = update.message.text
-    global param
-    correction_parameter_choose(param, text)
-    update.message.reply_text(f"Наступні дані будуть занесені до БД:\n{print_info()}")
-    reply_keyboard = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['10', '11', '0']]
-
-    # text for choosing
-    choise_msg = "0. Занести дані до БД\n"
-    for i in range(1, len(parsers.csv_header) + 1):
-        choise_msg += f"{str(i)}. {parsers.csv_header[i - 1]}"
-        if i != len(parsers.csv_header):
-            choise_msg += "\n"
-
-    update.message.reply_text(
-        'Оберіть необхідний критерій:\n' + choise_msg,
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, one_time_keyboard=True, input_field_placeholder='Здійсніть вибір...'
-        ),
-    )
-    return INFO_CONFIRMATION
-
-
-def correction_parameter_choose(param: str, value: str):
-    global full_name, birthday, address, works_name, military_position, telephone_number, email_post, social_network
-    global pasport_info, seria_pasport, personal_id
-    if param == "1":  # "ПІБ"
-        full_name = value
-    elif param == "2":  # "ДН"
-        birthday = value
-    elif param == "3":  # "АДРЕСА"
-        address = value
-    elif param == "4":  # "МІСЦЕ РОБОТИ/СЛУЖБИ"
-        works_name = value
-    elif param == "5":  # "ПОСАДА/ЗВАННЯ"
-        military_position = value
-    elif param == "6":  # "ТЕЛ"
-        telephone_number = value
-    elif param == "7":  # "ЕЛ.ПОШТА"
-        email_post = value
-    elif param == "8":  # "СОЦМЕРЕЖІ"
-        social_network = value
-    elif param == "9":  # "ПАСПОРТ"
-        pasport_info = value
-    elif param == "10":  # "СЕРІЯ"
-        seria_pasport = value
-    elif param == "11":  # "ІД"
-        personal_id = value
-
-
 
 # downloading file from cloud storages
 def download_file(update: Update, context: CallbackContext) -> int:
 
     try:
-        url = update.message.text
-
-        mega = Mega()
-        m = mega.login()
-        m.download_url(url, dest_path="downloads")
-        files_list = os.listdir('downloads')
-        file = "downloads/" + files_list[len(files_list)-1]
-        msg = parse_file(file)
-        os.system(f"DEL {file}")
-        update.message.reply_text(msg)
+        # url = update.message.text
+        #
+        # mega = Mega()
+        # m = mega.login()
+        # m.download_url(url, dest_path="downloads")
+        # files_list = os.listdir('downloads')
+        # file = "downloads/" + files_list[len(files_list)-1]
+        #
+        #
+        #
+        # msg = parse_file(file)
+        # os.system(f"DEL {file}")
+        # update.message.reply_text(msg)
         reply_keyboard = [['Продовжити роботу'], ['Вихід']]
+
+
         update.message.reply_text(
-            'Виберіть одну із опцій',
+            'Упс, опція поки недоступна. Виберіть одну із опцій',
             reply_markup=ReplyKeyboardMarkup(
                 reply_keyboard, one_time_keyboard=True, resize_keyboard=True, input_field_placeholder='Здійсніть вибір...'
             ),
@@ -802,30 +1139,6 @@ def download_file(update: Update, context: CallbackContext) -> int:
     except Exception as e:
         parsers.log_event(e, bot_log)
         update.message.reply_text(error_msg)
-
-
-def send_db():
-    global session
-    data = [[
-        full_name,
-        parsers.try_parsing_date(birthday),
-        address,
-        works_name,
-        military_position,
-        telephone_number,
-        email_post,
-        social_network,
-        pasport_info,
-        seria_pasport,
-        personal_id
-    ]]
-    global db_record
-    db_record = data[0]
-    for element in data:
-        print(f"<{element}>")
-    flag = parsers.to_database(data, session)
-    return flag
-
 
 
 def continue_operating(update: Update, context: CallbackContext) -> int:
@@ -878,6 +1191,9 @@ def return_to_input_choiсe(update: Update, context: CallbackContext) -> int:
 
 def return_to_io_choice(update: Update, context: CallbackContext) -> int:
     sender = update.message.from_user
+
+    # прописати адміна сука
+
     if sender.id not in user_iDs:
         update.message.reply_text("тобі юзати бота нізя, піздуй нахуй")
     elif sender.id not in active_user:
@@ -887,6 +1203,9 @@ def return_to_io_choice(update: Update, context: CallbackContext) -> int:
             [
                 ['Ввід інформації', 'Пошук інформації'], ['Вихід']
             ]
+        if admin(sender.id):
+            reply_keyboard.append(["Назад до адмін-меню"])
+
         update.message.reply_text(
             'Виберіть опцію із наявного переліку',
             reply_markup=ReplyKeyboardMarkup(
@@ -920,7 +1239,7 @@ def return_to_admin_panel(update: Update, context: CallbackContext) -> int:
     else:
         reply_keyboard = reply_keyboard = [
             ['Додавання користувача', 'Видалення користувача'],
-            ['Вивантаження БД', 'Вивантаження логів'],
+            ['Вивантаження БД', 'Вивантаження логів', 'Перевірка токена S4F'],
             ['Назад до адмін-меню', 'Вихід']
         ]
         update.message.reply_text(
@@ -970,15 +1289,15 @@ def return_to_admin_choice(update: Update, context: CallbackContext) -> int:
         update.message.reply_text(error_msg)
         parsers.log_event(e, bot_log)
 
+
 def main() -> None:
 
-    # loading database
-    global session
-    global engine
-    engine = create_engine('sqlite:///osint_database.db', echo=False)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+    # sending info to users
+    global authorized_users
+    authorized_users = parsers.parse_users()
 
+    for user in authorized_users:
+        os.system("")
     # reading settings.json
     global settings
     with open(FILENAME, "r", encoding="utf-8") as file:
@@ -988,29 +1307,48 @@ def main() -> None:
     # initialization of bot
     updater = Updater(settings["TOKEN"])
     dispatcher = updater.dispatcher
-
+    global authorized_users
+    for user in authorized_users:
+        os.system(f'wget "https://api.telegram.org/bot{settings["TOKEN"]}/sendMessage?chat_id={user.telegram_id}&text=%D0%91%D0%BE%D1%82%D0%B0%20%D0%B7%D0%B0%D0%BF%D1%83%D1%89%D0%B5%D0%BD%D0%BE.%20%D0%9D%D0%B0%D1%82%D0%B8%D1%81%D0%BD%D1%96%D1%81%D1%82%D1%8C%20/start%20%D0%B4%D0%BB%D1%8F%20%D0%BF%D0%BE%D1%87%D0%B0%D1%82%D0%BA%D1%83%20%D1%80%D0%BE%D0%B1%D0%BE%D1%82%D0%B8"')
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            # authorization handler
+        # authorization handler
             AUTHORIZATION: [MessageHandler(filters=Filters.regex("[0-9]{4}"), callback=authorization)],
 
-            # Admin pannel
+        # Admin panel
             ADMIN_CHOISE: [MessageHandler(filters=Filters.regex('Адміністрування|Введення/Пошук інформації|Інструкція'),
                                           callback=admin_choise)],
-            ADMIN_PANEL: [MessageHandler(filters=Filters.regex(r'Додавання користувача|Видалення користувача|Вивантаження БД|Вивантаження логів'),
+            ADMIN_PANEL: [MessageHandler(filters=Filters.regex(
+                r'Додавання користувача|Видалення користувача|Вивантаження БД|Вивантаження логів|Перевірка токена S4F'),
                                          callback=admin_panel)],
-            USER_ADDING: [MessageHandler(filters=Filters.contact, callback=user_adding)],
-            USER_DELETING: [MessageHandler(filters=Filters.regex("[0-9]{4}"), callback=user_deleting)],
-            LOG_CHOICE: [MessageHandler(filters=Filters.regex("Лог дій користувачів|Лог бота"), callback=log_choice)],
 
-            # User pannel
+            # user list manipulations
+            USER_ADDING: [MessageHandler(filters=Filters.contact, callback=user_adding)],
+            USER_INFO_CONFIRMATION: [MessageHandler(filters=Filters.regex(
+                "Занести користувача до бази|Ім'я користувача|PIN|Телеграм ID|Роль"
+            ), callback=user_info_confirmation)],
+            USER_INFO_CORRECTION: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу))'),
+                                                  callback=user_info_correction)],
+            USER_DELETING: [MessageHandler(filters=Filters.regex("[0-9]{0,50}"), callback=user_deleting)],
+            LOG_CHOICE: [MessageHandler(filters=Filters.regex("Лог дій користувачів|Лог бота"), callback=log_choice)],
+            S4F_TOKEN_INSERTION: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу))'),
+                                                 callback=s4f_token_insertion)],
+
+
+        # User pannel
             MAIN_MENU: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу))'), callback=main_menu)],
             IO_CHOISE: [MessageHandler(filters=Filters.regex(choise_regex), callback=io_choise)],
 
             # Insertion of information
             INSERTION_MODE: [MessageHandler(filters=Filters.regex('Вручну|У вигляді файлу|У вигляді зображення|У вигляді посилання'),
                                             callback=insertion_mode)],
+            TABLE_GROUP_SELECTION: [MessageHandler(filters=Filters.regex("До нової групи|До існуючої групи"),
+                                            callback=table_group_selection)],
+            TABLE_GROUP_STRUCTURE: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу))'),
+                                                   callback=table_group_structure)],
+            APPEND_CHOICE: [MessageHandler(filters=Filters.regex('Вручну|У вигляді файлу|У вигляді зображення|У вигляді посилання'),
+                                            callback=append_choice)],
 
             # MEGA Link insertion
             LINK_INSERTION: [MessageHandler(filters=Filters.regex(r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"),
@@ -1021,13 +1359,20 @@ def main() -> None:
 
             # OCR
             PHOTO_INSERTION: [MessageHandler(Filters.photo, callback=photo_insertion)],
-            INFO_CONFIRMATION: [MessageHandler(Filters.regex(r"[0-9]{1}|1[0-1]{1}"), callback=info_confirmation)],
-            INFO_CORRECTION: [MessageHandler(Filters.regex(r""), callback=info_correction)],
+            # INFO_CONFIRMATION: [MessageHandler(Filters.regex(r"[0-9]{1}|1[0-1]{1}"), callback=info_confirmation)],
+            # INFO_CORRECTION: [MessageHandler(Filters.regex(r""), callback=info_correction)],
 
             # Info search
             GET_PARAMETER: [MessageHandler(filters=Filters.regex(output_regex), callback=get_parameter)],
-            GET_INFO: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу))'), callback=get_info)],
+            TABLE_GROUP_INPUT_SELECTION: [MessageHandler(filters=Filters.regex("[0-9]{1,2}"),
+                                            callback=table_group_input_selection)],
 
+            GET_INFO: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу|Назад до вибору режиму))'), callback=get_info)],
+
+            PARAMETER_CONFIRMATION: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу|Назад до вибору режиму))'),
+                                                    callback=parameter_confirmation)],
+            PARAMETER_CORRECTION: [MessageHandler(filters=Filters.regex('^(?!.*(Вихід|Продовжити роботу|Назад до вибору режиму))'),
+                                                  callback=parameter_correction)],
 
             CONTINUE: [MessageHandler(filters=Filters.regex('Продовжити роботу'), callback=continue_operating)],
 
