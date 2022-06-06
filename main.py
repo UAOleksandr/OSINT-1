@@ -97,7 +97,7 @@ def parse_file(file: str, table_group_name: str, append_choise=True):
             parsers.parser(file, table_group_name, append_choice=append_choise)
             flag = True
     if file:
-        os.system(f"DEL {file}")
+        os.system(f"rm {file}")
     if flag:
         return "Дані занесено до БД."
     if not flag:
@@ -1014,7 +1014,7 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
         if user.photo_search_flag:
             print(settings["apiUrl"], settings["apiKey"])
             solution = S4f.photo_search(imgname, settings["apiUrl"], settings["apiKey"])
-            os.system(f"del {imgname}")
+            os.system(f"rm {imgname}")
             update.message.reply_text(solution)
             reply_keyboard = [['Продовжити роботу'], ['Вихід']]
             update.message.reply_text(
@@ -1035,7 +1035,7 @@ def photo_insertion(update: Update, context: CallbackContext) -> int:
             ocr.file_name(imgname)
             data = ocr.full_info
             user.param_dict = ocr.results_to_parameters_dict(data)
-            os.system(f"del {imgname}")
+            os.system(f"rm {imgname}")
             update.message.reply_text(f"За допомогою OCR було отримано наступні дані:\n"
                                       f"{parsers.beautify_dict_output(user.param_dict)}")
 
@@ -1070,7 +1070,7 @@ def download_file(update: Update, context: CallbackContext) -> int:
         files_list = os.listdir('downloads')
         file = "downloads/" + files_list[len(files_list)-1]
         # msg = parse_file(file)
-        os.system(f"DEL {file}")
+        os.system(f"rm {file}")
         flag = False
         user = return_user(update.message.from_user.id)
         append = False
