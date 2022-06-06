@@ -26,7 +26,7 @@ def file_name(imgname):
     param = 1
     #print(imgname) '''назва файлу'''
     global img
-    img = Image.open (imgname)
+    img = Image.open(imgname)
     (width, height) = img.size
     global info
     global info_plus
@@ -43,7 +43,6 @@ def file_name(imgname):
                     info = {}
                     param = param + 1
                 elif param == 2:
-                    
                     param = param + 1
                 else:
                     param = param + 1
@@ -56,16 +55,16 @@ def file_name(imgname):
             print("Неможливо розпізнати текст низька роздільна здатність зображення")
             info["Err"] = "Неможливо розпізнати текст низька роздільна здатність зображення"
             break
-    if info_plus==info:
-        full_info=info
+    if info_plus == info:
+        full_info = info
     elif len(info_plus) > len(info):
-        full_info={**info, **info_plus}
+        full_info = {**info, **info_plus}
     elif len(info_plus) < len(info):
-        full_info={**info_plus, **info}
+        full_info = {**info_plus, **info}
     elif len(info_plus) == len(info):
-        full_info=info_plus
+        full_info = info_plus
     else:
-        full_info=info
+        full_info = info
 
 
 #print(number_data)
@@ -133,15 +132,15 @@ def main():
             info["Doc_Type"]="Паспорт"
             ocr_passport()
             break
-        elif  cyrillic_words[i] != 'ВОДИТЕЛЬСКОЕ'  or cyrillic_words[i] != 'ПАСПОРТ' or cyrillic_words[i] != 'Паспорт' or cyrillic_words[i] != 'паспорт' or cyrillic_words[i] != 'УДОСТОВЕРЕНИЕ'  or str(cyrillic_words[i]).upper() != 'ФМС':
-            if i==len(cyrillic_words)-1:
-                info["Doc_Type"]="Невідомий"
+        elif cyrillic_words[i] != 'ВОДИТЕЛЬСКОЕ'  or cyrillic_words[i] != 'ПАСПОРТ' or cyrillic_words[i] != 'Паспорт' or cyrillic_words[i] != 'паспорт' or cyrillic_words[i] != 'УДОСТОВЕРЕНИЕ'  or str(cyrillic_words[i]).upper() != 'ФМС':
+            if i == len(cyrillic_words) - 1:
+                info["Doc_Type"] = "Невідомий"
                 find_information()
                 break
             else: 
-                i=i+1
+                i = i + 1
         else:
-            i=i+1
+            i = i + 1
     file_name.close()
     file_surname.close()
     file_father_names.close()
@@ -286,17 +285,17 @@ def ocr_driver_licence():
             word = str(word).upper()
             if word in name_list:  #пошук по списку імен і прізвищ
                 pib = "ім'я: " + str(cyrillic_words[i])
-                info["Name"]=cyrillic_words[i]
+                info["Name"] = cyrillic_words[i]
                 i = i+1
             elif word in surname_list and word not in father_list:
 
                 # print(cyrillic_words[i])
                 pib = pib + " Прізвище: " + cyrillic_words[i]
-                info["Surname"]=cyrillic_words[i]
+                info["Surname"] = cyrillic_words[i]
                 i=i+1
             elif word in father_list:
                 pib = pib + " По батькові: " + cyrillic_words[i]
-                info["Patronymic"]=cyrillic_words[i]
+                info["Patronymic"] = cyrillic_words[i]
                 i = i+1
                 '''    
             elif word not in surname_list and str(cyrillic_words[i]).upper() in region_identificator_after :
@@ -561,6 +560,29 @@ def ocr_passport():
         find_passportborn()
     get_pib_from_passport()
 
+
+def results_to_parameters_dict(data: dict):
+    return_dict = {}
+    surname, name, patronymic = "", "", ""
+    birthday, address, seria, number = "", "", "", ""
+    if 'Surname' in data.keys():
+        surname = str(data['Surname']).capitalize()
+    if 'Name' in data.keys():
+        name = str(data['Name']).capitalize()
+    if 'Patronymic' in data.keys():
+        patronymic = str(data['Patronymic']).capitalize()
+    return_dict.update({"ПІБ": f"{surname} {name} {patronymic}"})
+    if 'Born' in data.keys():
+        return_dict.update({"ДН": data['Born']})
+    if 'Place' in data.keys():
+        return_dict.update({"адреса": data['Place']})
+
+    if 'Pasport_number' in data.keys():
+        if re.match("[0-9]{1-4} [0-9]{4-12}", data['Pasport_number']):
+            passport_data_list = data['Pasport_number'].split(' ')
+            return_dict.update({"номер": passport_data_list[0], "серія": passport_data_list[1]})
+
+    return return_dict
 
 
     

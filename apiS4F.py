@@ -81,7 +81,7 @@ def photo_search(imgname, apiUrl, apiKey):
         image_name = response["result"]['image']
         face_parameter = response["result"]['faces'][0]
         # print(face_parameter)
-        search_face(face_parameter, image_name)
+        search_face(face_parameter, image_name, apiUrl, apiKey)
     # іноді буває так що сервіс ігнорить зображення потрібно ще раз перезакинути
     except IndexError:
         global solution

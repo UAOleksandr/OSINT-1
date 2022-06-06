@@ -31,7 +31,7 @@ def read_tablegroups(filepath='database_operations/tablegroups.json'):
 
 def write_tablegroups(info: dict, filepath='database_operations/tablegroups.json'):
     with open(filepath, "w", encoding="utf-8") as file:
-        json.dump(info, file)
+        json.dump(info, file, indent=4)
 
 
 def return_pragma(tablename: str):
@@ -68,9 +68,10 @@ def count_records(tablename, parameter='', value=''):
 
 # Паше нехуйово
 def upload_data(df, tablegroup: str, table_name="",  append_choise=True):
+
     # тут можна перевіряти чи є target_table_info. Якщо немає - створювати нову таблицю.
     if tablegroup:
-        print(f"<{df}, {tablegroup}>")
+        # print(f"<{df}, {tablegroup}>")
         # Прописати механізм визначення ключових полів та полів, що є у вибраній таблиці
 
         field_names_list = []
@@ -155,9 +156,9 @@ def upload_data(df, tablegroup: str, table_name="",  append_choise=True):
 
 def return_tables_with_common_fields(tables: dict, field: str, target_table_name=""):
     output_arr = []
-    for key in tables.keys():
-        if field in tables[key] and key != target_table_name:
-            output_arr.append(key)
+    for table in tables.keys():
+        if field in tables[table] and table != target_table_name:
+            output_arr.append(table)
 
     return output_arr
 
@@ -214,7 +215,6 @@ def get_data_from_db(parameter: str, value: str, table_group: str, path=""):
         # ітерація полів у вибраній таблиці
         for field in tables_dict[target_tablename]:
 
-
             # пропуск айдішніків
             if field == 'id':
                 continue
@@ -237,7 +237,8 @@ WHERE '{target_tablename}'.{parameter} LIKE '%{value}%';"""
                 # Ітеруємо по списку таблиць із однаковими полями
                 for table in tables_with_common_fields:  # Перевіряємо поле, що рівне параметру
                     print(f"Result of counting values({field},{new_val}) in {table}: {count_records(table, field, new_val)}")
-                    # Якщо таблиця "світилась" у запиті чи це уже початкова таблиця чи у таблиці 0 запитів
+
+                    # Якщо таблиця "світилась" у запиті чи це уже початкова таблиця чи 0 результатів
                     if f"INNER JOIN '{table}'" in sql or table == primary_table or not count_records(table, field, new_val):
                         # target_tablename = table
                         if table in table_names:
@@ -263,7 +264,6 @@ WHERE '{target_tablename}'.{parameter} LIKE '%{value}%';"""
 
     return_rows = []
     for row in result:
-        # row = list(dict.fromkeys(row))
         return_rows.append(row)
     return return_rows, headers_list
 

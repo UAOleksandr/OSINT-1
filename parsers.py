@@ -95,14 +95,62 @@ csv_path = __file__.replace('parsers.py', 'person_info.csv')
 Base = declarative_base()
 
 
+# для гарного виведення словника
+def beautify_dict_output(data: dict) -> str:
+    return_str = ""
+    for key in data.keys():
+        return_str += f"{key}: {data[key]}\n"
+    return return_str
+
+
+def return_pragma(fields: dict) -> dict:
+    pragma = {}
+    additional_list = []
+    for element in fields.values():
+        additional_list.extend(element)
+    additional_list = list(dict.fromkeys(additional_list))
+    if 'id' in additional_list:
+        additional_list.remove('id')
+
+    for key in additional_list:
+        pragma.update({additional_list.index(key) + 1: key})
+
+    return pragma
+
+
 class User:
 
     def __init__(self, username: str, PIN: int, telegram_id: int, admin: bool):
 
+        # stuff for authentication
         self.username = username
         self.PIN = PIN
         self.telegram_id = telegram_id
         self.admin = admin
+
+        # stuff for bot functioning
+
+        # dictionary of parameters, that is used in input/output operations
+        self.param_dict = {}
+
+        # string, that contains type of input
+        self.input_choice = ""
+
+        # pragma for DB
+        self.pragma = {}
+
+        self.append_choice = ""
+        self.param = ""
+
+        # boolean, that is used to determine whether OCR (False) or S4F functionality (True) will be used
+        self.photo_search_flag = False
+
+        # string, that contains table group, in/to which information will be searched/added
+        self.table_group_name = ""
+
+        #
+        self.pragma = {}
+
 
     def __str__(self):
         return f'''Ім'я користувача:{self.username}
@@ -112,7 +160,8 @@ class User:
 '''
 
     def to_json(self):
-        return self.__dict__
+        return {"username": self.username, "PIN": self.PIN, "telegram_id": self.telegram_id, "admin": self.admin}
+
 
 def user_init(data: dict):
     return User(data['username'], data['PIN'], data['telegram_id'], data['admin'])

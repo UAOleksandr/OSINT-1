@@ -16,5 +16,11 @@
         "PIN": 5881,
         "telegram_id": 302824429,
         "admin": false
+    },
+    {
+        "username": "\u0410\u043d\u0434\u0440\u0435\u0439 \u0411\u0435\u0441\u043f\u0430\u043b\u043e\u0432",
+        "PIN": 6139,
+        "telegram_id": 5107988583,
+        "admin": false
     }
 ]
